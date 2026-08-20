@@ -1,26 +1,19 @@
 # Orbis Architektur
 
-## Schichten
+## Frontend
 
-1. **Frontend:** React-Komponenten, Navigation und produktive Arbeitsansichten in `app/`.
-2. **REST API:** serverseitige Route Handler in `app/api/`; sie bilden die einzige Grenze für schreibende Client-Zugriffe.
-3. **Domäne und Datenzugriff:** Drizzle-Schema und D1-Zugriff in `db/`.
-4. **Persistenz:** relationale SQLite/D1-Tabellen und versionierte SQL-Migrationen in `drizzle/`.
+`apps/frontend` ist eine eigenständige React-/Vite-Anwendung. Sie kennt keine Datenbankzugänge und kommuniziert ausschließlich über `VITE_API_URL` mit der REST API. Anmeldung, Projekte, Aufgaben und Dokumente werden mit `credentials: include` geladen.
 
-Die Vinext-Struktur hält Client- und Servercode in getrennten Modulen, wird als Cloudflare-kompatibles ESM-Bundle gebaut und lässt sich später in getrennte Deployments überführen, ohne das Domänenmodell zu ändern.
+## Backend
 
-## Sicherheit
+`apps/backend` ist eine eigenständige Fastify-Anwendung. Routen, Authentifizierung, Rollenprüfung, Validierung und Datenbankzugriffe bleiben serverseitig getrennt. Das Backend wird direkt mit Node.js, PM2 oder im Container ausgeführt.
 
-- Benutzer werden ausschließlich durch Administratoren angelegt; es existiert keine öffentliche Registrierung.
-- Passwörter werden mit PBKDF2-SHA-256, individuellen Salts und 210.000 Iterationen geprüft.
-- Sitzungskennungen werden kryptografisch erzeugt und ausschließlich als `HttpOnly`, `Secure`, `SameSite=Strict` Cookie gespeichert.
-- Status und Rolle werden serverseitig geladen; deaktivierte Benutzer können keine Sitzung erhalten.
-- Neue Endpunkte müssen Rollen- und Projektmitgliedschaft serverseitig prüfen.
+## MariaDB
 
-## Datenmodell
+MariaDB verwendet InnoDB und `utf8mb4_unicode_ci`. Beim Start erzeugt das Backend die Datenbank und fehlende Tabellen/Indizes idempotent. Das Schema enthält Benutzer, Projekte, Projektmitglieder, Aufgaben, Kommentare, Dokumentordner, Dokumente, Termine und Aktivitäten.
 
-Das relationale Modell umfasst `users`, `sessions`, `projects`, `project_members`, `tasks`, `comments`, `document_folders`, `documents`, `calendar_events` und `activities`. Indizes decken die zentralen Listen-, Status-, Fälligkeits- und Aktivitätsabfragen ab.
+Passwörter werden mit bcrypt und Kostenfaktor 12 gespeichert. Es gibt keine E-Mail-Felder, öffentliche Registrierung oder E-Mail-Wiederherstellung. Sitzungen werden verschlüsselt in einem HttpOnly-Cookie geführt.
 
-## Nächste Ausbaustufe
+## Betrieb
 
-Die erste Version hält Integrationen, Webhooks, API-Tokens, Automatisierungen, Gantt, Zeiterfassung, Reporting und KI bewusst außerhalb des Kerns. Erweiterungen werden als neue API- und Domänenmodule ergänzt.
+Für Homelab-Betrieb stehen Docker Compose, ein Nginx-Frontend-Container und PM2-Konfiguration bereit. Das Frontend kann unabhängig als statisches Bundle verteilt werden; das Backend benötigt Netzwerkzugriff auf MariaDB.

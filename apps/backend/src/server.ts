@@ -1,0 +1,27 @@
+import Fastify, { type FastifyError } from "fastify";
+import cors from "@fastify/cors";
+import secureSession from "@fastify/secure-session";
+import { createHash } from "node:crypto";
+import { env } from "./config/env.js";
+import { initializeDatabase } from "./db/database.js";
+import { authRoutes } from "./routes/auth.js";
+import { dashboardRoutes } from "./routes/dashboard.js";
+import { documentRoutes } from "./routes/documents.js";
+import { projectRoutes } from "./routes/projects.js";
+import { taskRoutes } from "./routes/tasks.js";
+import { userRoutes } from "./routes/users.js";
+import "./types.js";
+
+const app=Fastify({logger:true});
+await initializeDatabase();
+await app.register(cors,{origin:env.FRONTEND_ORIGIN,credentials:true});
+await app.register(secureSession,{key:createHash("sha256").update(env.SESSION_SECRET).digest(),cookie:{path:"/",httpOnly:true,sameSite:"lax",secure:env.NODE_ENV==="production"}});
+app.get("/api/health",async()=>({status:"ok",database:"mariadb"}));
+await app.register(authRoutes,{prefix:"/api"});
+await app.register(dashboardRoutes,{prefix:"/api"});
+await app.register(projectRoutes,{prefix:"/api"});
+await app.register(taskRoutes,{prefix:"/api"});
+await app.register(documentRoutes,{prefix:"/api"});
+await app.register(userRoutes,{prefix:"/api"});
+app.setErrorHandler((error:FastifyError,_request,reply)=>{app.log.error(error);reply.code(error.statusCode??500).send({message:error.statusCode&&error.statusCode<500?error.message:"Unerwarteter Serverfehler."});});
+await app.listen({host:"0.0.0.0",port:env.PORT});

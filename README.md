@@ -1,37 +1,72 @@
 # Orbis
 
-Orbis verbindet Projektmanagement, Aufgaben und interne Dokumentation in einer ruhigen, responsiven Arbeitsumgebung.
+Orbis vereint Projektmanagement, Aufgabenverwaltung und interne Dokumentation. Die Anwendung folgt derselben klaren Monorepo-Struktur wie `dkl-homelab`: eigenständiges React-Frontend, eigenständiges Fastify-Backend und MariaDB als relationale Datenbank.
 
-## Enthaltene erste Version
+## Projektstruktur
 
-- Anmeldung nur mit Benutzername und Passwort, ohne E-Mail-Flows
-- Rollenmodell für Administrator, Projektleiter, Mitglied und Gast
-- Dashboard mit Projekten, Aufgaben, Terminen und Aktivitäten
-- Projektübersicht mit Fortschritt und Team
-- Aufgabenliste und Kanban-Board mit Drag-and-drop
-- Hierarchische Dokumentation mit Editor und Autosave-Feedback
-- Monatskalender, globale Suche und Benutzeradministration
-- Persönliche Einstellungen sowie heller und dunkler Modus
-- Relationales D1-Schema für Benutzer, Sitzungen, Projekte, Aufgaben, Kommentare, Dokumente, Termine und Aktivitäten
+```text
+orbis/
+├── apps/
+│   ├── frontend/          # React, TypeScript, Vite
+│   │   ├── public/
+│   │   ├── src/
+│   │   ├── Dockerfile
+│   │   └── package.json
+│   └── backend/           # Fastify REST API
+│       ├── src/
+│       │   ├── config/
+│       │   ├── db/
+│       │   ├── middleware/
+│       │   └── routes/
+│       ├── Dockerfile
+│       └── package.json
+├── deploy/nginx/
+├── docs/
+├── .env.example
+├── docker-compose.yml
+├── ecosystem.config.cjs
+├── orbis.sh
+└── package.json
+```
 
-## Entwicklung
+## Lokale Entwicklung
 
-Voraussetzung ist Node.js 22.13 oder neuer.
+Voraussetzungen: Node.js 22+ und MariaDB 11+.
 
 ```bash
+cp .env.example .env
 npm install
 npm run dev
 ```
 
-Der lokale Demo-Zugang lautet `dennis` / `orbis2026`. Das bereitgestellte Administratorkonto muss bei einer echten Inbetriebnahme unmittelbar ein neues Passwort erhalten.
+- Frontend: http://localhost:5173
+- REST API: http://localhost:4000/api
+- Healthcheck: http://localhost:4000/api/health
 
-## Architektur
+Beim ersten Start legt das Backend Datenbank, Tabellen, Administratorkonto und Beispieldaten an. Die Bootstrap-Zugangsdaten kommen ausschließlich aus `.env`.
 
-Die Oberfläche liegt in `app/`. Server-Endpunkte befinden sich getrennt unter `app/api/`; Datenbankzugriffe und Schema liegen in `db/`, versionierte Migrationen in `drizzle/`. Sicherheitsentscheidungen, Passwortprüfung und Sitzungsanlage erfolgen serverseitig. Die vollständige Architektur ist in `docs/architecture.md` beschrieben.
+## Docker Compose
+
+```bash
+cp .env.example .env
+docker compose up --build -d
+```
+
+Danach ist Orbis unter http://localhost:8080 erreichbar. MariaDB-Daten liegen dauerhaft im Volume `orbis_mariadb`.
+
+## Produktion mit PM2
+
+```bash
+chmod +x orbis.sh
+./orbis.sh
+```
+
+Vor der Inbetriebnahme müssen `DB_PASSWORD`, `SESSION_SECRET` und `BOOTSTRAP_ADMIN_PASSWORD` in `.env` durch sichere Werte ersetzt werden.
 
 ## Qualität
 
 ```bash
+npm run typecheck
 npm run build
-npm run lint
+npm test
 ```

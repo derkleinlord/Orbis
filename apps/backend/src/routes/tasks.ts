@@ -1,0 +1,14 @@
+import { randomUUID } from "node:crypto";
+import type { FastifyPluginAsync } from "fastify";
+import type { RowDataPacket } from "mysql2";
+import { z } from "zod";
+import { getDb } from "../db/database.js";
+import { requireAuth } from "../middleware/auth.js";
+
+const status=z.enum(["Offen","In Bearbeitung","Blockiert","In Prüfung","Erledigt"]),priority=z.enum(["Niedrig","Normal","Hoch","Kritisch"]);
+const createSchema=z.object({title:z.string().trim().min(2).max(500),projectId:z.string().uuid(),description:z.string().max(50000).default(""),priority:priority.default("Normal"),dueDate:z.string().nullable().optional(),assigneeId:z.string().uuid().nullable().optional()});
+export const taskRoutes:FastifyPluginAsync=async app=>{
+  app.get("/tasks",{preHandler:requireAuth},async request=>{const query=z.object({mine:z.coerce.boolean().optional(),projectId:z.string().uuid().optional()}).parse(request.query);const conditions:string[]=[];const values:string[]=[];if(query.mine){conditions.push("t.assignee_id=?");values.push(request.currentUser!.id)}if(query.projectId){conditions.push("t.project_id=?");values.push(query.projectId)}const where=conditions.length?`WHERE ${conditions.join(" AND ")}`:"";const[rows]=await getDb().query<RowDataPacket[]>(`SELECT t.id,t.title,t.description,t.status,t.priority,t.due_date AS dueDate,t.assignee_id AS assigneeId,p.id AS projectId,p.name AS project,u.display_name AS assigneeName FROM tasks t JOIN projects p ON p.id=t.project_id LEFT JOIN users u ON u.id=t.assignee_id ${where} ORDER BY FIELD(t.status,'Offen','In Bearbeitung','Blockiert','In Prüfung','Erledigt'),t.due_date IS NULL,t.due_date`,values);return {tasks:rows};});
+  app.post("/tasks",{preHandler:requireAuth},async(request,reply)=>{const parsed=createSchema.safeParse(request.body);if(!parsed.success)return reply.code(400).send({message:"Ungültige Aufgabendaten."});const id=randomUUID();await getDb().query("INSERT INTO tasks(id,project_id,title,description,priority,assignee_id,creator_id,due_date) VALUES(?,?,?,?,?,?,?,?)",[id,parsed.data.projectId,parsed.data.title,parsed.data.description,parsed.data.priority,parsed.data.assigneeId??request.currentUser!.id,request.currentUser!.id,parsed.data.dueDate??null]);return reply.code(201).send({id});});
+  app.patch("/tasks/:id/status",{preHandler:requireAuth},async(request,reply)=>{const params=z.object({id:z.string().uuid()}).safeParse(request.params),body=z.object({status}).safeParse(request.body);if(!params.success||!body.success)return reply.code(400).send({message:"Ungültiger Status."});const[result]=await getDb().query("UPDATE tasks SET status=? WHERE id=?",[body.data.status,params.data.id]);if((result as {affectedRows:number}).affectedRows===0)return reply.code(404).send({message:"Aufgabe nicht gefunden."});return {ok:true};});
+};
