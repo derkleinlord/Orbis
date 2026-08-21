@@ -53,12 +53,24 @@ type TaskStatus =
   "Offen" | "In Bearbeitung" | "Blockiert" | "In Prüfung" | "Erledigt";
 type Task = {
   id: string;
+  projectId?: string;
   title: string;
   project: string;
   status: TaskStatus;
   priority: string;
   due: string;
   assignee: string;
+};
+type Project = {
+  id: string;
+  name: string;
+  description: string;
+  status: string;
+  startDate: string;
+  endDate: string | null;
+  lead: string;
+  members: number;
+  openTasks: number;
 };
 
 const projectData = [
@@ -168,34 +180,52 @@ const statusColors: Record<TaskStatus, string> = {
   "In Prüfung": "#9b72c9",
   Erledigt: "#469978",
 };
+const projectColors = ["#6f6af8", "#e79556", "#4b9d83", "#4d82bc", "#9b72c9", "#df6d60"];
+const initials = (name: string | null) => name ? name.split(" ").map(part=>part[0]).join("").slice(0,2).toUpperCase() : "–";
+const formatDueDate = (date: string | null) => date ? new Intl.DateTimeFormat("de-DE",{day:"2-digit",month:"short"}).format(new Date(`${date}T12:00:00`)) : "Ohne Termin";
 
 export default function Home() {
   const [loggedIn, setLoggedIn] = useState(false),
+    [sessionChecked, setSessionChecked] = useState(false),
     [active, setActive] = useState<View>("dashboard"),
     [mobileOpen, setMobileOpen] = useState(false),
     [dark, setDark] = useState(false),
     [searchOpen, setSearchOpen] = useState(false),
     [taskModal, setTaskModal] = useState(false),
+    [taskModalProjectId, setTaskModalProjectId] = useState<string | null>(null),
+    [projectModal, setProjectModal] = useState(false),
     [taskView, setTaskView] = useState<"list" | "board">("list"),
     [tasks, setTasks] = useState(initialTasks),
+    [projectTasks, setProjectTasks] = useState(initialTasks),
+    [projects, setProjects] = useState<Project[]>([]),
+    [selectedProjectId, setSelectedProjectId] = useState<string | null>(null),
     [docTitle, setDocTitle] = useState("Designsystem"),
     [docContent, setDocContent] = useState(
       "Unser Designsystem schafft eine konsistente, ruhige Produkterfahrung. Es bündelt Farben, Typografie, Abstände und wiederverwendbare Komponenten an einem zentralen Ort.",
     ),
     [saved, setSaved] = useState(true),
-    [loginError, setLoginError] = useState(""),
-    [projectIds, setProjectIds] = useState<Record<string,string>>({});
+    [loginError, setLoginError] = useState("");
+  useEffect(() => {
+    void fetch(`${API_URL}/auth/me`, { credentials: "include" })
+      .then(response => setLoggedIn(response.ok))
+      .catch(() => setLoggedIn(false))
+      .finally(() => setSessionChecked(true));
+  }, []);
   useEffect(() => {
     if (!loggedIn) return;
-    void Promise.all([
-      fetch(`${API_URL}/tasks?mine=true`, { credentials: "include" }).then(response => response.ok ? response.json() : Promise.reject()),
-      fetch(`${API_URL}/projects`, { credentials: "include" }).then(response => response.ok ? response.json() : Promise.reject()),
-      fetch(`${API_URL}/documents`, { credentials: "include" }).then(response => response.ok ? response.json() : Promise.reject()),
-    ]).then(([taskResult, projectResult, documentResult]) => {
-      setTasks(taskResult.tasks.map((task: { id:string;title:string;project:string;status:TaskStatus;priority:string;dueDate:string|null;assigneeName:string|null }) => ({ id:task.id,title:task.title,project:task.project,status:task.status,priority:task.priority,due:task.dueDate ? new Intl.DateTimeFormat("de-DE",{day:"2-digit",month:"short"}).format(new Date(task.dueDate)) : "Ohne Termin",assignee:task.assigneeName?.split(" ").map(part=>part[0]).join("").slice(0,2).toUpperCase() ?? "–" })));
-      setProjectIds(Object.fromEntries(projectResult.projects.map((project: {id:string;name:string}) => [project.name, project.id])));
-      if (documentResult.documents[0]) { setDocTitle(documentResult.documents[0].title); setDocContent(documentResult.documents[0].content); }
-    }).catch(() => setLoginError("Die Orbis-Daten konnten nicht geladen werden."));
+    const request = <T,>(path: string) => fetch(`${API_URL}${path}`, { credentials: "include" }).then(async response => {
+      if (!response.ok) throw new Error(`${path}: ${response.status}`);
+      return response.json() as Promise<T>;
+    });
+    const mapTasks = (items: Array<{ id:string;projectId:string;title:string;project:string;status:TaskStatus;priority:string;dueDate:string|null;assigneeName:string|null }>): Task[] => items.map(task => ({ id:task.id,projectId:task.projectId,title:task.title,project:task.project,status:task.status,priority:task.priority,due:formatDueDate(task.dueDate),assignee:initials(task.assigneeName) }));
+    void request<{projects: Project[]}>("/projects").then(result => {
+      setProjects(result.projects.map(project => ({...project,members:Number(project.members),openTasks:Number(project.openTasks)})));
+    }).catch(() => setLoginError("Die Projekte konnten nicht geladen werden."));
+    void request<{tasks: Parameters<typeof mapTasks>[0]}>("/tasks?mine=true").then(result => setTasks(mapTasks(result.tasks)));
+    void request<{tasks: Parameters<typeof mapTasks>[0]}>("/tasks").then(result => setProjectTasks(mapTasks(result.tasks)));
+    void request<{documents: Array<{title:string;content:string}>}>("/documents").then(result => {
+      if (result.documents[0]) { setDocTitle(result.documents[0].title); setDocContent(result.documents[0].content); }
+    });
   }, [loggedIn]);
   const nav = (view: View) => {
     setActive(view);
@@ -218,18 +248,38 @@ export default function Home() {
   const addTask = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    const project=String(data.get("project")), title=String(data.get("title")), priority=String(data.get("priority")), dueDate=String(data.get("due")||"")||null;
-    const response=await fetch(`${API_URL}/tasks`,{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({title,projectId:projectIds[project],priority,dueDate})});
+    const projectId=String(data.get("project")), title=String(data.get("title")), priority=String(data.get("priority")), dueDate=String(data.get("due")||"")||null, description=String(data.get("description")||"");
+    const project=projects.find(item=>item.id===projectId);
+    const response=await fetch(`${API_URL}/tasks`,{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({title,projectId,priority,dueDate,description})});
     const result=(await response.json()) as {id?:string};
     if(!response.ok||!result.id){setLoginError("Die Aufgabe konnte nicht gespeichert werden.");return;}
-    setTasks(t=>[{id:result.id!,title,project,status:"Offen",priority,due:dueDate??"Ohne Termin",assignee:"DL"},...t]);
+    if(!project){setLoginError("Das ausgewählte Projekt wurde nicht gefunden.");return;}
+    const createdTask={id:result.id!,projectId,title,project:project.name,status:"Offen" as TaskStatus,priority,due:formatDueDate(dueDate),assignee:"DL"};
+    setTasks(t=>[createdTask,...t]);
+    setProjectTasks(t=>[createdTask,...t]);
+    setProjects(list=>list.map(item=>item.id===projectId?{...item,openTasks:item.openTasks+1}:item));
     setTaskModal(false);
-    setActive("tasks");
+    setTaskModalProjectId(null);
+    if(!selectedProjectId)setActive("tasks");
   };
   const moveTask = (id: string, status: TaskStatus) => {
     setTasks(list=>list.map(task=>task.id===id?{...task,status}:task));
+    setProjectTasks(list=>list.map(task=>task.id===id?{...task,status}:task));
     void fetch(`${API_URL}/tasks/${id}/status`,{method:"PATCH",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});
   };
+  const addProject = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data=new FormData(event.currentTarget), name=String(data.get("name")), description=String(data.get("description")||""), startDate=String(data.get("startDate")), endDate=String(data.get("endDate")||"")||null;
+    const response=await fetch(`${API_URL}/projects`,{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,description,startDate,endDate})});
+    const result=(await response.json()) as {id?:string;message?:string};
+    if(!response.ok||!result.id){setLoginError(result.message??"Das Projekt konnte nicht gespeichert werden.");return;}
+    const project:Project={id:result.id,name,description,status:"Aktiv",startDate,endDate,lead:"Dennis Lucking",members:1,openTasks:0};
+    setProjects(list=>[project,...list]);
+    setSelectedProjectId(project.id);
+    setProjectModal(false);
+  };
+  const openTaskModal=(projectId?:string)=>{setTaskModalProjectId(projectId??null);setTaskModal(true);};
+  if (!sessionChecked) return <main className={`login-page ${dark ? "dark" : ""}`} />;
   if (!loggedIn)
     return (
       <Login
@@ -246,7 +296,10 @@ export default function Home() {
         nav={nav}
         open={mobileOpen}
         close={() => setMobileOpen(false)}
-        logout={() => { void fetch(`${API_URL}/auth/logout`, { method: "POST", credentials: "include" }); setLoggedIn(false); }}
+        logout={() => { void fetch(`${API_URL}/auth/logout`, { method: "POST", credentials: "include" }); setLoggedIn(false); setSessionChecked(true); }}
+        projects={projects}
+        openProject={(id)=>{setSelectedProjectId(id);nav("projects");}}
+        newProject={()=>setProjectModal(true)}
       />
       {mobileOpen && (
         <button
@@ -255,6 +308,7 @@ export default function Home() {
           aria-label="Menü schließen"
         />
       )}
+      {loginError && <div className="app-message" role="alert"><span>{loginError}</span><button onClick={()=>setLoginError("")} aria-label="Hinweis schließen"><X/></button></div>}
       <section className="workspace">
         <header className="topbar">
           <button
@@ -288,7 +342,7 @@ export default function Home() {
           />
         )}
         {active === "projects" && (
-          <Projects newTask={() => setTaskModal(true)} />
+          <Projects projects={projects} tasks={projectTasks} selectedProjectId={selectedProjectId} selectProject={setSelectedProjectId} newTask={openTaskModal} newProject={()=>setProjectModal(true)} moveTask={moveTask} />
         )}
         {active === "tasks" && (
           <Tasks
@@ -322,8 +376,9 @@ export default function Home() {
         <SearchOverlay close={() => setSearchOpen(false)} nav={nav} />
       )}
       {taskModal && (
-        <TaskModal close={() => setTaskModal(false)} submit={addTask} />
+        <TaskModal close={() => {setTaskModal(false);setTaskModalProjectId(null);}} submit={addTask} projects={projects} selectedProjectId={taskModalProjectId} />
       )}
+      {projectModal && <ProjectModal close={()=>setProjectModal(false)} submit={addProject} />}
     </main>
   );
 }
@@ -407,12 +462,18 @@ function Sidebar({
   open,
   close,
   logout,
+  projects,
+  openProject,
+  newProject,
 }: {
   active: View;
   nav: (v: View) => void;
   open: boolean;
   close: () => void;
   logout: () => void;
+  projects: Project[];
+  openProject: (id: string) => void;
+  newProject: () => void;
 }) {
   const items: Array<[View, string, typeof LayoutDashboard]> = [
     ["dashboard", "Dashboard", LayoutDashboard],
@@ -452,17 +513,17 @@ function Sidebar({
       </nav>
       <div className="sidebar-section">
         <p>PROJEKTE</p>
-        {projectData.map((p) => (
+        {projects.slice(0,5).map((p, index) => (
           <button
             className="project-link"
-            onClick={() => nav("projects")}
-            key={p.name}
+            onClick={() => openProject(p.id)}
+            key={p.id}
           >
-            <i style={{ background: p.color }} />
+            <i style={{ background: projectColors[index % projectColors.length] }} />
             {p.name}
           </button>
         ))}
-        <button className="add-project">
+        <button className="add-project" onClick={newProject}>
           <Plus />
           Projekt hinzufügen
         </button>
@@ -672,23 +733,60 @@ function Dashboard({
   );
 }
 
-function Projects({ newTask }: { newTask: () => void }) {
+function Projects({ projects, tasks, selectedProjectId, selectProject, newTask, newProject, moveTask }: {
+  projects: Project[];
+  tasks: Task[];
+  selectedProjectId: string | null;
+  selectProject: (id: string | null) => void;
+  newTask: (projectId?: string) => void;
+  newProject: () => void;
+  moveTask: (id: string, status: TaskStatus) => void;
+}) {
+  const selected=projects.find(project=>project.id===selectedProjectId);
+  const selectedTasks=selected ? tasks.filter(task=>task.projectId===selected.id) : [];
+  const progress=(project:Project)=>{
+    const projectTaskList=tasks.filter(task=>task.projectId===project.id);
+    return projectTaskList.length ? Math.round(projectTaskList.filter(task=>task.status==="Erledigt").length/projectTaskList.length*100) : 0;
+  };
   return (
     <div className="content">
       <PageHead
         eyebrow="PROJEKTE"
-        title="Gemeinsam vorankommen."
-        sub="Alle aktiven Vorhaben, Zuständigkeiten und Fortschritte."
+        title={selected ? selected.name : "Gemeinsam vorankommen."}
+        sub={selected ? selected.description || "Projektaufgaben, Zuständigkeiten und Fortschritt." : "Alle aktiven Vorhaben, Zuständigkeiten und Fortschritte."}
         action={
-          <button className="primary-button">
+          <button className="primary-button" onClick={selected ? ()=>newTask(selected.id) : newProject}>
             <Plus />
-            Neues Projekt
+            {selected ? "Neue Aufgabe" : "Neues Projekt"}
           </button>
         }
       />
+      {selected ? (
+        <section className="project-detail">
+          <button className="project-back" onClick={()=>selectProject(null)}>← Alle Projekte</button>
+          <div className="project-detail-summary panel">
+            <span><ListTodo/><b>{selectedTasks.filter(task=>task.status!=="Erledigt").length}</b><small>Offene Aufgaben</small></span>
+            <span><CheckCircle2/><b>{progress(selected)}%</b><small>Fortschritt</small></span>
+            <span><Users/><b>{selected.members}</b><small>Mitglieder</small></span>
+            <span><UserCog/><b>{selected.lead}</b><small>Projektleitung</small></span>
+          </div>
+          <div className="project-task-panel panel">
+            <header><div><h2>Aufgaben im Projekt</h2><p>Alle dem Projekt zugeordneten Aufgaben.</p></div><b>{selectedTasks.length}</b></header>
+            {selectedTasks.length ? selectedTasks.map(task=>(
+              <div className="project-task-row" key={task.id}>
+                <button className="task-check" onClick={()=>moveTask(task.id,"Erledigt")} aria-label={`${task.title} erledigen`}>{task.status==="Erledigt"&&<Check/>}</button>
+                <span><strong>{task.title}</strong><small>{task.due}</small></span>
+                <span><i style={{background:statusColors[task.status]}}/>{task.status}</span>
+                <span className={`priority p-${task.priority.toLowerCase()}`}>{task.priority}</span>
+                <span className="avatar">{task.assignee}</span>
+              </div>
+            )):<div className="project-empty"><ListTodo/><h3>Noch keine Aufgaben</h3><p>Erstelle die erste Aufgabe für dieses Projekt.</p><button className="primary-button" onClick={()=>newTask(selected.id)}><Plus/>Aufgabe erstellen</button></div>}
+          </div>
+        </section>
+      ) : (<>
       <div className="filterbar">
         <button className="filter-active">
-          Aktiv <span>6</span>
+          Aktiv <span>{projects.length}</span>
         </button>
         <button>Archiviert</button>
         <span />
@@ -698,12 +796,13 @@ function Projects({ newTask }: { newTask: () => void }) {
         </button>
       </div>
       <section className="project-grid-large">
-        {projectData.map((p, i) => (
-          <article className="project-tile" key={p.name}>
+        {projects.map((p, i) => {
+          const value=progress(p), color=projectColors[i%projectColors.length];
+          return (<article className="project-tile" key={p.id} onClick={()=>selectProject(p.id)}>
             <header>
               <span
                 className="project-symbol big"
-                style={{ background: p.color }}
+                style={{ background: color }}
               >
                 {p.name[0]}
               </span>
@@ -716,7 +815,7 @@ function Projects({ newTask }: { newTask: () => void }) {
             <div className="project-stats">
               <span>
                 <ListTodo />
-                {p.meta}
+                {tasks.filter(task=>task.projectId===p.id&&task.status!=="Erledigt").length} offene Aufgaben
               </span>
               <span>
                 <Users />
@@ -725,10 +824,10 @@ function Projects({ newTask }: { newTask: () => void }) {
             </div>
             <div className="progress-copy">
               <span>Projektfortschritt</span>
-              <b>{p.progress}%</b>
+              <b>{value}%</b>
             </div>
             <div className="progress">
-              <i style={{ width: `${p.progress}%`, background: p.color }} />
+              <i style={{ width: `${value}%`, background: color }} />
             </div>
             <footer>
               <span className={`avatar avatar-${i}`}>
@@ -737,14 +836,15 @@ function Projects({ newTask }: { newTask: () => void }) {
               <small>
                 Leitung: <b>{p.lead}</b>
               </small>
-              <button onClick={newTask}>
+              <button onClick={(event)=>{event.stopPropagation();newTask(p.id);}}>
                 <Plus />
                 Aufgabe
               </button>
             </footer>
-          </article>
-        ))}
+          </article>);
+        })}
       </section>
+      </>)}
     </div>
   );
 }
@@ -1330,9 +1430,13 @@ function SearchOverlay({
 function TaskModal({
   close,
   submit,
+  projects,
+  selectedProjectId,
 }: {
   close: () => void;
   submit: (e: FormEvent<HTMLFormElement>) => void;
+  projects: Project[];
+  selectedProjectId: string | null;
 }) {
   return (
     <div className="modal-backdrop" onMouseDown={close}>
@@ -1362,9 +1466,9 @@ function TaskModal({
         <div className="form-two">
           <label>
             Projekt
-            <select name="project">
-              {projectData.map((p) => (
-                <option key={p.name}>{p.name}</option>
+            <select name="project" defaultValue={selectedProjectId??projects[0]?.id} required>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
           </label>
@@ -1397,6 +1501,23 @@ function TaskModal({
             Aufgabe erstellen
           </button>
         </footer>
+      </form>
+    </div>
+  );
+}
+
+function ProjectModal({close,submit}:{close:()=>void;submit:(event:FormEvent<HTMLFormElement>)=>void}) {
+  return (
+    <div className="modal-backdrop" onMouseDown={close}>
+      <form className="form-modal" onSubmit={submit} onMouseDown={event=>event.stopPropagation()}>
+        <header><div><h2>Neues Projekt</h2><p>Lege ein Projekt an und starte direkt mit den Aufgaben.</p></div><button type="button" onClick={close}><X/></button></header>
+        <label>Projektname<input name="name" placeholder="Name des Projekts" autoFocus required minLength={2}/></label>
+        <label>Beschreibung<textarea name="description" placeholder="Ziel und Kontext des Projekts …"/></label>
+        <div className="form-two">
+          <label>Startdatum<input name="startDate" type="date" defaultValue={new Date().toISOString().slice(0,10)} required/></label>
+          <label>Enddatum<input name="endDate" type="date"/></label>
+        </div>
+        <footer><button type="button" onClick={close}>Abbrechen</button><button className="primary-button" type="submit">Projekt erstellen</button></footer>
       </form>
     </div>
   );

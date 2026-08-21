@@ -26,7 +26,7 @@ services:
     environment:
       PORT: 4010
       DB_HOST: mariadb
-      FRONTEND_ORIGIN: http://localhost:8080
+      FRONTEND_ORIGIN: https://orbis.dkl-lab.eu
     depends_on:
       mariadb:
         condition: service_healthy
