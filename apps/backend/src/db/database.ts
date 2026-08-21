@@ -8,6 +8,15 @@ let pool: Pool | undefined;
 export function getDb(): Pool { if (!pool) throw new Error("MariaDB wurde noch nicht initialisiert."); return pool; }
 
 async function seedDatabase(db: Pool) {
+  const [bootstrapUsers] = await db.query<RowDataPacket[]>("SELECT id,password_hash FROM users WHERE username=? LIMIT 1", [env.BOOTSTRAP_ADMIN_USERNAME.toLowerCase()]);
+  const bootstrapUser = bootstrapUsers[0];
+  if (bootstrapUser) {
+    if (!(await bcrypt.compare(env.BOOTSTRAP_ADMIN_PASSWORD, bootstrapUser.password_hash))) {
+      const passwordHash = await bcrypt.hash(env.BOOTSTRAP_ADMIN_PASSWORD, 12);
+      await db.query("UPDATE users SET password_hash=? WHERE id=?", [passwordHash, bootstrapUser.id]);
+    }
+    return;
+  }
   const [users] = await db.query<RowDataPacket[]>("SELECT id FROM users LIMIT 1");
   if (users.length) return;
   const adminId = randomUUID();

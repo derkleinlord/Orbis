@@ -39,7 +39,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000/api";
+const API_URL = import.meta.env.VITE_API_URL ?? "/api";
 
 type View =
   | "dashboard"
@@ -206,10 +206,14 @@ export default function Home() {
     const data = new FormData(event.currentTarget);
     const username = String(data.get("username"));
     const password = String(data.get("password"));
-    const response = await fetch(`${API_URL}/auth/login`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
-    const result = (await response.json()) as { message?: string };
-    if (response.ok) { setLoggedIn(true); setLoginError(""); }
-    else setLoginError(result.message ?? "Die Anmeldung ist momentan nicht möglich.");
+    try {
+      const response = await fetch(`${API_URL}/auth/login`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
+      const result = (await response.json()) as { message?: string };
+      if (response.ok) { setLoggedIn(true); setLoginError(""); }
+      else setLoginError(result.message ?? "Die Anmeldung ist momentan nicht möglich.");
+    } catch {
+      setLoginError("Der Server ist momentan nicht erreichbar.");
+    }
   };
   const addTask = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -370,7 +374,6 @@ function Login({
               name="password"
               type="password"
               autoComplete="current-password"
-              defaultValue="orbis2026"
               required
             />
           </label>
@@ -381,7 +384,7 @@ function Login({
         </form>
         <div className="demo-hint">
           <Sparkles />
-          Demo-Zugang ist bereits eingetragen.
+          Melde dich mit deinem Administratorkonto an.
         </div>
       </section>
       <aside className="login-visual">

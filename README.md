@@ -40,10 +40,11 @@ npm run dev
 ```
 
 - Frontend: http://localhost:5173
-- REST API: http://localhost:4000/api
-- Healthcheck: http://localhost:4000/api/health
+- REST API: http://localhost:4010/api
+- Healthcheck: http://localhost:4010/api/health
 
 Beim ersten Start legt das Backend Datenbank, Tabellen, Administratorkonto und Beispieldaten an. Die Bootstrap-Zugangsdaten kommen ausschließlich aus `.env`.
+Das Passwort des Bootstrap-Administrators wird bei einem Backend-Neustart mit `BOOTSTRAP_ADMIN_PASSWORD` synchronisiert.
 
 ## Docker Compose
 
@@ -62,6 +63,7 @@ chmod +x orbis.sh
 ```
 
 Vor der Inbetriebnahme müssen `DB_PASSWORD`, `SESSION_SECRET` und `BOOTSTRAP_ADMIN_PASSWORD` in `.env` durch sichere Werte ersetzt werden.
+PM2 und die Docker-Images setzen `NODE_ENV` für die jeweilige Laufzeit selbst. Das Vite-Frontend liest die Backend-`.env` im Projektstamm nicht ein.
 
 ## Qualität
 
